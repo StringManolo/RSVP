@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RSVP Reader</title>
+<style>
+  * { box-sizing: border-box; }
+  :root {
+    --bg:#0f0f12; --panel:#1a1a20; --panel-2:#232329;
+    --text:#e8e8ec; --muted:#8a8a95;
+    --accent:#4d9fff; --orp:#ff4d6d; --line:#26262e;
+    --ok:#4ddb7a; --warn:#ffb84d; --err:#ff6b7f;
+  }
+  html, body {
+    margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height:100vh;
+  }
+  body { display:flex; flex-direction:column; }
+  header {
+    padding:16px 24px; display:flex; justify-content:space-between;
+    align-items:center; border-bottom:1px solid var(--line);
+  }
+  header h1 { font-size:16px; font-weight:600; margin:0; letter-spacing:.3px; }
+  header .sub { color:var(--muted); font-size:12px; }
+
+  #inputScreen {
+    flex:1; display:flex; flex-direction:column; gap:16px;
+    padding:24px; max-width:900px; margin:0 auto; width:100%;
+  }
+  .textareaWrap { position:relative; flex:1; display:flex; min-height:320px; }
+  #textInput {
+    flex:1; width:100%; background:var(--panel);
+    border:1px solid var(--line); border-radius:12px;
+    color:var(--text); padding:16px; font-size:15px; line-height:1.6;
+    resize:vertical; font-family:inherit; outline:none;
+    transition:border-color .15s, background .15s;
+  }
+  #textInput:focus { border-color:var(--accent); }
+  .textareaWrap.dragover #textInput { border-color:var(--accent); background:#1f2531; }
+  .dropOverlay {
+    position:absolute; inset:0; border-radius:12px;
+    background:rgba(77,159,255,.12);
+    border:2px dashed var(--accent);
+    display:none; align-items:center; justify-content:center;
+    pointer-events:none; font-size:18px; font-weight:600;
+    color:var(--accent); letter-spacing:.5px;
+  }
+  .textareaWrap.dragover .dropOverlay { display:flex; }
+
+  .row { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  button.primary {
+    background:var(--accent); color:#fff; border:none;
+    padding:12px 24px; border-radius:10px; font-size:15px;
+    font-weight:600; cursor:pointer; transition:filter .15s;
+  }
+  button.primary:hover { filter:brightness(1.1); }
+  button.primary:disabled { opacity:.5; cursor:not-allowed; }
+  button.secondary {
+    background:var(--panel-2); color:var(--text);
+    border:1px solid #2e2e38; border-radius:10px;
+    padding:12px 20px; font-size:14px; cursor:pointer;
+    transition:background .15s, border-color .15s;
+    display:inline-flex; align-items:center; gap:8px;
+  }
+  button.secondary:hover { background:#2c2c34; border-color:#3a3a44; }
+  button.secondary:disabled { opacity:.5; cursor:not-allowed; }
+  .stats { color:var(--muted); font-size:14px; }
+  .stats b { color:var(--text); }
+  .hint-inline { color:var(--muted); font-size:12px; margin-left:auto; }
+  .hint-inline.warn { color:var(--warn); }
+  .hint-inline.ok { color:var(--ok); }
+
+  #fileInput { display:none; }
+
+  .fileMeta {
+    display:none; align-items:center; gap:10px;
+    padding:8px 12px; border-radius:8px;
+    background:var(--panel-2); border:1px solid #2e2e38;
+    font-size:13px; color:var(--muted);
+  }
+  .fileMeta.show { display:flex; }
+  .fileMeta b { color:var(--text); }
+  .fileMeta button {
+    background:transparent; border:none; color:var(--muted);
+    cursor:pointer; font-size:14px; padding:2px 6px;
+    border-radius:4px;
+  }
+  .fileMeta button:hover { color:var(--text); background:#2c2c34; }
+
+  #readerScreen {
+    flex:1; display:none; flex-direction:column;
+    padding:24px; max-width:960px; margin:0 auto; width:100%;
+  }
+  #readerScreen.active { display:flex; }
+
+  .topRow {
+    display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:12px; gap:12px; flex-wrap:wrap;
+  }
+  .topRow .info { color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; }
+  .topRow .info b { color:var(--text); }
+  button.ghost {
+    background:transparent; color:var(--muted);
+    border:1px solid var(--line); border-radius:8px;
+    padding:6px 12px; cursor:pointer; font-size:13px;
+    transition:color .15s, border-color .15s;
+  }
+  button.ghost:hover { color:var(--text); border-color:#3a3a44; }
+  button.ghost.danger:hover { color:#ff8095; border-color:#4a2a33; }
+
+  .stage {
+    flex:1; min-height:340px;
+    position:relative;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:16px; overflow:hidden;
+    user-select:none;
+  }
+  .stage::before, .stage::after {
+    content:""; position:absolute; left:50%;
+    width:2px; height:14px; background:#2e2e38;
+    transform:translateX(-50%); border-radius:1px;
+  }
+  .stage::before { top: calc(50% - 70px); }
+  .stage::after  { top: calc(50% + 56px); }
+  #wordDisplay {
+    position:absolute; left:50%; top:50%;
+    transform: translate(0, -50%);
+    white-space:nowrap;
+    font-size: clamp(40px, 8.5vw, 88px);
+    font-weight:500;
+    will-change: transform;
+  }
+  #wordDisplay .left, #wordDisplay .right { color:var(--text); }
+  #wordDisplay .orp { color:var(--orp); }
+
+  .progressWrap { margin-top:16px; display:flex; align-items:center; gap:12px; }
+  #progress {
+    flex:1; height:6px; background:var(--line);
+    border-radius:3px; cursor:pointer; position:relative; overflow:hidden;
+  }
+  #progressFill { height:100%; background:var(--accent); width:0%; border-radius:3px; }
+  .time { font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; min-width:80px; text-align:right; }
+
+  .controls {
+    margin-top:16px; display:flex; align-items:center;
+    justify-content:center; gap:12px; flex-wrap:wrap;
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; padding:16px;
+  }
+  .ctrl-btn {
+    background:var(--panel-2); color:var(--text);
+    border:1px solid #2e2e38; border-radius:10px;
+    width:48px; height:48px;
+    display:inline-flex; align-items:center; justify-content:center;
+    cursor:pointer; font-size:16px;
+    transition:background .15s, border-color .15s;
+    user-select:none; font-family:inherit;
+  }
+  .ctrl-btn:hover { background:#2c2c34; border-color:#3a3a44; }
+  .ctrl-btn.big {
+    width:64px; height:64px;
+    background:var(--accent); border-color:var(--accent);
+    color:#fff; font-size:20px;
+  }
+  .ctrl-btn.big:hover { filter:brightness(1.1); }
+
+  .speedBox {
+    display:flex; align-items:center; gap:12px;
+    background:var(--panel-2); padding:8px 16px;
+    border-radius:10px; border:1px solid #2e2e38;
+    min-width:280px;
+  }
+  .speedBox label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .speedBox input[type="range"] { flex:1; accent-color:var(--accent); cursor:pointer; }
+  #wpmValue { font-variant-numeric:tabular-nums; font-weight:600; min-width:60px; text-align:right; font-size:14px; }
+
+  .hint { margin-top:12px; text-align:center; color:var(--muted); font-size:12px; line-height:1.8; }
+  .hint kbd {
+    background:var(--panel-2); border:1px solid #2e2e38;
+    padding:2px 6px; border-radius:4px;
+    font-family:inherit; font-size:11px; margin:0 1px;
+  }
+
+  .modal-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,.75);
+    display:none; align-items:center; justify-content:center;
+    z-index:100; padding:24px;
+  }
+  .modal-overlay.active { display:flex; }
+  .modal {
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:16px; padding:28px; max-width:480px; width:100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal h2 { margin:0 0 8px 0; font-size:18px; }
+  .modal p { margin:0 0 20px 0; color:var(--muted); font-size:14px; line-height:1.6; }
+  .modal .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-bottom:12px; }
+  .modal .bar > div { height:100%; background:var(--accent); width:0%; transition:width .15s; }
+  .modal .meta {
+    display:flex; justify-content:space-between;
+    font-size:13px; color:var(--muted); margin-bottom:20px;
+    font-variant-numeric:tabular-nums;
+  }
+  .modal .actions { display:flex; gap:12px; justify-content:flex-end; }
+  .modal .note { font-size:12px; color:var(--warn); margin-top:-8px; margin-bottom:16px; }
+
+  .toast {
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(80px);
+    background:var(--panel-2); border:1px solid #2e2e38;
+    color:var(--text); padding:12px 20px; border-radius:10px;
+    font-size:14px; box-shadow:0 10px 30px rgba(0,0,0,.4);
+    opacity:0; transition:opacity .25s, transform .25s;
+    pointer-events:none; z-index:200; max-width:80vw;
+  }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.ok    { border-color:#2b5a3a; }
+  .toast.err   { border-color:#5a2b34; }
+  .toast.warn  { border-color:#5a4a2b; }
+
+  @media (max-width:600px) {
+    #wordDisplay { font-size:48px; }
+    .speedBox { min-width:0; flex:1 1 100%; order:99; }
+    .controls { gap:8px; padding:12px; }
+    .ctrl-btn { width:42px; height:42px; font-size:14px; }
+    .ctrl-btn.big { width:56px; height:56px; font-size:18px; }
+    .stage::before { top: calc(50% - 50px); }
+    .stage::after  { top: calc(50% + 40px); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>RSVP Reader</h1>
+  <span class="sub">Rapid Serial Visual Presentation</span>
+</header>
+
+<div id="inputScreen">
+  <div class="textareaWrap" id="dropZone">
+    <textarea id="textInput" placeholder="Pega aquí tu texto o arrastra un archivo..."></textarea>
+    <div class="dropOverlay">Suelta el archivo aquí</div>
+  </div>
+
+  <div class="fileMeta" id="fileMeta">
+    <span>📄 <b id="fileName">archivo.txt</b></span>
+    <span id="fileSize">0 KB</span>
+    <button id="clearFileBtn" title="Quitar archivo">✕</button>
+  </div>
+
+  <div class="row">
+    <button class="secondary" id="uploadBtn" title="Subir archivo de texto">📁 Subir archivo</button>
+    <button class="primary" id="startBtn">▶ Empezar a leer</button>
+    <button class="secondary" id="shareBtn" disabled>🔗 Copiar enlace</button>
+    <span class="stats" id="inputStats">0 palabras</span>
+    <span class="hint-inline" id="urlHint"></span>
+  </div>
+  <input type="file" id="fileInput" multiple>
+</div>
+
+<div id="readerScreen">
+  <div class="topRow">
+    <button class="ghost" id="backToInput">← Nuevo texto</button>
+    <span class="info"><b id="wordCounter">0</b> / <span id="totalWords">0</span></span>
+    <button class="ghost" id="exportBtn">⏺ Exportar vídeo</button>
+  </div>
+
+  <div class="stage">
+    <div id="wordDisplay"></div>
+  </div>
+
+  <div class="progressWrap">
+    <div id="progress"><div id="progressFill"></div></div>
+    <span class="time" id="timeLeft">--:--</span>
+  </div>
+
+  <div class="controls">
+    <button class="ctrl-btn" id="back10Btn" title="Atrás 10">⏪</button>
+    <button class="ctrl-btn" id="backBtn"  title="Atrás 1">◀</button>
+    <button class="ctrl-btn big" id="playPauseBtn" title="Play/Pausa">▶</button>
+    <button class="ctrl-btn" id="fwdBtn"   title="Adelante 1">▶</button>
+    <button class="ctrl-btn" id="fwd10Btn" title="Adelante 10">⏩</button>
+
+    <div class="speedBox">
+      <label for="wpm">WPM</label>
+      <input type="range" id="wpm" min="60" max="1200" step="10" value="300">
+      <span id="wpmValue">300</span>
+    </div>
+  </div>
+
+  <div class="hint">
+    <kbd>Espacio</kbd> play/pausa ·
+    <kbd>←</kbd><kbd>→</kbd> mover ·
+    <kbd>Shift</kbd>+<kbd>←/→</kbd> ±10 ·
+    <kbd>↑</kbd><kbd>↓</kbd> velocidad ·
+    <kbd>R</kbd> reiniciar ·
+    <kbd>Esc</kbd> salir
+  </div>
+</div>
+
+<div class="modal-overlay" id="exportModal">
+  <div class="modal">
+    <h2 id="exportTitle">Exportando vídeo…</h2>
+    <p id="exportDesc">Grabando en tiempo real. No cambies de pestaña ni minimices el navegador, o la grabación podría pausarse.</p>
+    <div class="bar"><div id="exportProgress"></div></div>
+    <div class="meta">
+      <span id="exportElapsed">0s</span>
+      <span id="exportPercent">0%</span>
+      <span id="exportTotal">--:--</span>
+    </div>
+    <div class="note" id="exportNote"></div>
+    <div class="actions">
+      <button class="secondary" id="exportCancel">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  "use strict";
+
+  const inputScreen   = document.getElementById('inputScreen');
+  const readerScreen  = document.getElementById('readerScreen');
+  const textInput     = document.getElementById('textInput');
+  const inputStats    = document.getElementById('inputStats');
+  const startBtn      = document.getElementById('startBtn');
+  const shareBtn      = document.getElementById('shareBtn');
+  const urlHint       = document.getElementById('urlHint');
+  const backToInput   = document.getElementById('backToInput');
+  const exportBtn     = document.getElementById('exportBtn');
+
+  const dropZone      = document.getElementById('dropZone');
+  const uploadBtn     = document.getElementById('uploadBtn');
+  const fileInput     = document.getElementById('fileInput');
+  const fileMeta      = document.getElementById('fileMeta');
+  const fileNameEl    = document.getElementById('fileName');
+  const fileSizeEl    = document.getElementById('fileSize');
+  const clearFileBtn  = document.getElementById('clearFileBtn');
+
+  const wordDisplay   = document.getElementById('wordDisplay');
+  const wordCounter   = document.getElementById('wordCounter');
+  const totalWordsEl  = document.getElementById('totalWords');
+  const progress      = document.getElementById('progress');
+  const progressFill  = document.getElementById('progressFill');
+  const timeLeftEl    = document.getElementById('timeLeft');
+
+  const playPauseBtn  = document.getElementById('playPauseBtn');
+  const backBtn       = document.getElementById('backBtn');
+  const fwdBtn        = document.getElementById('fwdBtn');
+  const back10Btn     = document.getElementById('back10Btn');
+  const fwd10Btn      = document.getElementById('fwd10Btn');
+  const wpmSlider     = document.getElementById('wpm');
+  const wpmValueEl    = document.getElementById('wpmValue');
+
+  const exportModal   = document.getElementById('exportModal');
+  const exportTitle   = document.getElementById('exportTitle');
+  const exportDesc    = document.getElementById('exportDesc');
+  const exportProgress= document.getElementById('exportProgress');
+  const exportElapsed = document.getElementById('exportElapsed');
+  const exportPercent = document.getElementById('exportPercent');
+  const exportTotal   = document.getElementById('exportTotal');
+  const exportNote    = document.getElementById('exportNote');
+  const exportCancel  = document.getElementById('exportCancel');
+
+  const toastEl       = document.getElementById('toast');
+
+  let words = [];
+  let index = 0;
+  let playing = false;
+  let timer = null;
+  let wpm = 300;
+  let uploadedFileNames = [];
+  let currentWordText = '';
+
+  const WPM_KEY = 'rsvp.wpm';
+
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  function formatTime(s) {
+    if (s < 0) s = 0;
+    if (s < 60) return Math.round(s) + 's';
+    const m = Math.floor(s / 60);
+    const r = Math.round(s % 60);
+    return m + ':' + String(r).padStart(2, '0');
+  }
+  function formatBytes(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    return (b / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
+  let toastTimer = null;
+  function toast(msg, type) {
+    toastEl.textContent = msg;
+    toastEl.className = 'toast show' + (type ? ' ' + type : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toastEl.className = 'toast' + (type ? ' ' + type : '');
+    }, 2800);
+  }
+
+  // ---------- Font / measurement ----------
+  const FONT_FAMILY = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+  const FONT_WEIGHT = 500;
+  const MEASURE_REF_SIZE = 100;
+  const MIN_FONT_SIZE = 10;
+
+  let _measureCtx = null;
+  function getMeasureCtx() {
+    if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
+    return _measureCtx;
+  }
+
+  function getBaseFontSizePx() {
+    if (window.innerWidth <= 600) return 48;
+    return Math.max(40, Math.min(88, window.innerWidth * 0.085));
+  }
+
+  function orpIndex(word) {
+    const letters = word.replace(/[^\p{L}\p{N}]/gu, '');
+    const n = letters.length;
+    if (n <= 1)  return 0;
+    if (n <= 5)  return 1;
+    if (n <= 9)  return 2;
+    if (n <= 13) return 3;
+    if (n <= 17) return 4;
+    if (n <= 21) return 5;
+    if (n <= 25) return 6;
+    // Palabras/tokens muy largos: seguimos desplazando el pivote poco a
+    // poco en vez de congelarlo en 4, para que la "cola" tras el ORP no
+    // crezca sin límite en proporción al resto de la palabra.
+    return 6 + Math.floor((n - 25) / 4);
+  }
+
+  function splitWordByOrp(word) {
+    const leadingMatch = word.match(/^[^\p{L}\p{N}]*/u);
+    const leadingLen = leadingMatch ? leadingMatch[0].length : 0;
+    const target = orpIndex(word);
+    // Recorremos la palabra real y colocamos el pivote sobre la letra/número
+    // número "target" (saltando puntuación por el camino). Antes se asumía
+    // que la posición "leadingLen + target" caía siempre sobre una letra,
+    // lo cual falla en tokens con mucha puntuación interna (URLs: ':', '/',
+    // '.', '=' antes de la primera letra "útil"), dejando el ORP sobre un
+    // signo de puntuación en vez de una letra.
+    let orpPos = word.length ? word.length - 1 : 0;
+    let seen = -1;
+    for (let i = leadingLen; i < word.length; i++) {
+      if (/[\p{L}\p{N}]/u.test(word[i])) {
+        seen++;
+        if (seen === target) { orpPos = i; break; }
+      }
+    }
+    return {
+      leftTxt:  word.slice(0, orpPos),
+      orpTxt:   word[orpPos] || '',
+      rightTxt: word.slice(orpPos + 1)
+    };
+  }
+
+  // Mide el ancho real del texto usando el mismo font que el DOM
+  function measureText(text, fontSize) {
+    if (!text) return 0;
+    const ctx = getMeasureCtx();
+    ctx.font = `${FONT_WEIGHT} ${fontSize}px ${FONT_FAMILY}`;
+    return ctx.measureText(text).width;
+  }
+
+  // Calcula el font-size necesario para que la palabra entera quepa
+  // y el ORP quede centrado. halfNeeded es la distancia desde el ORP
+  // hasta el borde más lejano (izquierda o derecha).
+  function computeFittingFontSize(word, availableWidth) {
+    const parts = splitWordByOrp(word);
+    // Medimos al tamaño de referencia
+    const leftW  = measureText(parts.leftTxt,  MEASURE_REF_SIZE);
+    const orpW   = measureText(parts.orpTxt,   MEASURE_REF_SIZE);
+    const rightW = measureText(parts.rightTxt, MEASURE_REF_SIZE);
+    const halfNeeded = Math.max(leftW + orpW / 2, rightW + orpW / 2, 1);
+    const maxByWidth = (availableWidth / 2) * MEASURE_REF_SIZE / halfNeeded;
+    const base = getBaseFontSizePx();
+    return Math.max(MIN_FONT_SIZE, Math.min(base, maxByWidth));
+  }
+
+  // ---------- Tokenizer con chunking de tokens largos ----------
+  const MAX_TOKEN_LEN = 16;
+
+  function chunkLongToken(tok) {
+    if (tok.length <= MAX_TOKEN_LEN) return [tok];
+    // Partimos por delimitadores naturales conservándolos
+    const pieces = tok.split(/(?<=[\/\?\&\=\-_\.,;:!¡¿#@])/);
+    const chunks = [];
+    let cur = '';
+    for (const p of pieces) {
+      if (!p) continue;
+      if (p.length > MAX_TOKEN_LEN) {
+        if (cur) { chunks.push(cur); cur = ''; }
+        for (let i = 0; i < p.length; i += MAX_TOKEN_LEN) {
+          chunks.push(p.slice(i, i + MAX_TOKEN_LEN));
+        }
+      } else if ((cur + p).length <= MAX_TOKEN_LEN) {
+        cur += p;
+      } else {
+        if (cur) chunks.push(cur);
+        cur = p;
+      }
+    }
+    if (cur) chunks.push(cur);
+    return chunks.length ? chunks : [tok];
+  }
+
+  function tokenize(text) {
+    const cleaned = text.replace(/\s+/g, ' ').trim();
+    if (!cleaned) return [];
+    const tokens = cleaned.split(' ').filter(Boolean);
+    const out = [];
+    for (const t of tokens) {
+      if (t.length <= MAX_TOKEN_LEN) out.push(t);
+      else out.push(...chunkLongToken(t));
+    }
+    return out;
+  }
+
+  function updateInputStats() {
+    const n = tokenize(textInput.value).length;
+    inputStats.innerHTML = `<b>${n}</b> ${n === 1 ? 'palabra' : 'palabras'}`;
+    startBtn.disabled = n === 0;
+    shareBtn.disabled = n === 0;
+  }
+  textInput.addEventListener('input', () => {
+    if (uploadedFileNames.length && textInput.value.trim() === '') clearFileMeta();
+    updateInputStats();
+  });
+
+  // ---------- Render ----------
+  function renderWord(word) {
+    currentWordText = word;
+    if (!word) { wordDisplay.textContent = ''; return; }
+
+    const parts = splitWordByOrp(word);
+    const stage = wordDisplay.parentElement;
+    let stageW = stage ? stage.clientWidth : 0;
+    if (stageW < 100) stageW = Math.max(300, window.innerWidth - 60);
+    const availableWidth = stageW * 0.94;
+    const fontSize = computeFittingFontSize(word, availableWidth);
+    wordDisplay.style.fontSize = fontSize + 'px';
+
+    wordDisplay.innerHTML = '';
+    const l = document.createElement('span'); l.className='left';  l.textContent = parts.leftTxt;
+    const o = document.createElement('span'); o.className='orp';   o.textContent = parts.orpTxt;
+    const r = document.createElement('span'); r.className='right'; r.textContent = parts.rightTxt;
+    wordDisplay.append(l, o, r);
+
+    requestAnimationFrame(() => {
+      const leftW = l.getBoundingClientRect().width;
+      const orpW  = o.getBoundingClientRect().width;
+      let shift = leftW + orpW / 2;
+
+      // Red de seguridad: la palabra nunca debe renderizarse fuera del
+      // stage (que recorta con overflow:hidden), aunque algún token
+      // extremo se escape del cálculo de tamaño de fuente de arriba.
+      // Ver siempre el texto completo importa más que el ORP perfectamente
+      // centrado en ese caso límite.
+      const stage = wordDisplay.parentElement;
+      const stageW = stage ? stage.clientWidth : 0;
+      if (stageW > 0) {
+        const totalW = wordDisplay.getBoundingClientRect().width;
+        const half = stageW / 2;
+        const margin = 10;
+        const maxShift = half - margin;
+        const minShift = totalW - half + margin;
+        if (minShift > maxShift) {
+          shift = (minShift + maxShift) / 2;
+        } else {
+          shift = Math.max(minShift, Math.min(maxShift, shift));
+        }
+      }
+
+      wordDisplay.style.transform = `translate(${-shift}px, -50%)`;
+    });
+  }
+
+  // ---------- Timing ----------
+  function intervalFor(word) {
+    const base = 60000 / wpm;
+    let mult = 1;
+    const len = word.replace(/[^\p{L}\p{N}]/gu, '').length;
+    if (len > 8)  mult += 0.15;
+    if (len > 12) mult += 0.15;
+    if (/[.!?…]$/.test(word)) mult += 0.80;
+    else if (/[,;:]$/.test(word)) mult += 0.40;
+    return Math.round(base * mult);
+  }
+
+  function showCurrentWord() {
+    if (words.length === 0) { wordDisplay.textContent = ''; return; }
+    if (index < 0) index = 0;
+    if (index >= words.length) index = words.length - 1;
+    renderWord(words[index]);
+    wordCounter.textContent = index + 1;
+    updateProgress();
+  }
+
+  function step() {
+    if (!playing) return;
+    if (index >= words.length) { stop(); return; }
+    showCurrentWord();
+    const delay = intervalFor(words[index]);
+    index++;
+    if (index >= words.length) {
+      timer = setTimeout(() => { showCurrentWord(); stop(); }, delay);
+      return;
+    }
+    timer = setTimeout(step, delay);
+  }
+
+  function play() {
+    if (words.length === 0) return;
+    if (index >= words.length) index = 0;
+    playing = true;
+    playPauseBtn.textContent = '❚❚';
+    step();
+  }
+  function pause() {
+    playing = false;
+    playPauseBtn.textContent = '▶';
+    if (timer) { clearTimeout(timer); timer = null; }
+  }
+  function stop() { pause(); }
+  function togglePlay() { playing ? pause() : play(); }
+
+  function updateProgress() {
+    const total = words.length;
+    const pct = total === 0 ? 0 : (index / total) * 100;
+    progressFill.style.width = pct + '%';
+    const remaining = Math.max(0, total - index);
+    const secLeft = Math.round((remaining * 60000 / wpm) / 1000);
+    timeLeftEl.textContent = formatTime(secLeft);
+  }
+
+  function seekTo(newIndex) {
+    index = Math.max(0, Math.min(words.length - 1, newIndex));
+    if (playing && timer) { clearTimeout(timer); timer = null; }
+    showCurrentWord();
+    if (playing) step();
+  }
+  function nudge(delta) {
+    const wasPlaying = playing;
+    if (wasPlaying) pause();
+    seekTo(index + delta);
+    if (wasPlaying) play();
+  }
+
+  function enterReader() {
+    words = tokenize(textInput.value);
+    if (words.length === 0) return;
+    index = 0;
+    totalWordsEl.textContent = words.length;
+    progressFill.style.width = '0%';
+    inputScreen.style.display = 'none';
+    readerScreen.classList.add('active');
+    showCurrentWord();
+    setTimeout(play, 200);
+  }
+  function exitReader() {
+    pause();
+    readerScreen.classList.remove('active');
+    inputScreen.style.display = 'flex';
+    textInput.focus();
+  }
+
+  // ============================================================
+  // ==================  FILE UPLOAD / DROP  ====================
+  // ============================================================
+  const TEXT_EXTENSIONS = new Set([
+    'txt','md','markdown','rst','log','csv','tsv',
+    'js','mjs','cjs','ts','tsx','jsx','json','json5','jsonc',
+    'html','htm','xml','svg','css','scss','sass','less',
+    'py','rb','php','java','kt','kts','scala','groovy',
+    'c','h','cpp','cc','cxx','hpp','hh','cs','go','rs','swift','m','mm',
+    'sh','bash','zsh','fish','ps1','bat','cmd',
+    'yml','yaml','toml','ini','cfg','conf','env',
+    'sql','graphql','gql','proto',
+    'lua','pl','r','jl','dart','ex','exs','erl','hs','clj','cljs','el','vim',
+    'tex','bib','org','adoc','pod','makefile','mk','dockerfile','gitignore'
+  ]);
+
+  function isLikelyTextFile(file) {
+    if (file.type && file.type.startsWith('text/')) return true;
+    if (file.type === 'application/json' || file.type === 'application/xml') return true;
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (TEXT_EXTENSIONS.has(ext)) return true;
+    const nameLower = file.name.toLowerCase();
+    if (['makefile','dockerfile','readme','license','changelog'].includes(nameLower)) return true;
+    return false;
+  }
+
+  function stripHtml(html) {
+    let s = html.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+    s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+    s = s.replace(/<\/(p|div|h[1-6]|li|tr|br|section|article|header|footer)>/gi, '\n');
+    s = s.replace(/<br\s*\/?>/gi, '\n');
+    s = s.replace(/<[^>]+>/g, ' ');
+    s = s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+         .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+         .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+    return s;
+  }
+
+  function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error || new Error('Error leyendo el archivo'));
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.readAsText(file, 'utf-8');
+    });
+  }
+
+  async function handleFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    const accepted = [];
+    const rejected = [];
+    for (const f of files) {
+      if (isLikelyTextFile(f)) accepted.push(f);
+      else rejected.push(f);
+    }
+    if (accepted.length === 0) {
+      toast('Formato no reconocido como texto. Prueba con .txt, .md, .js, .py, .json, .html…', 'err');
+      return;
+    }
+    const texts = [];
+    const loadedNames = [];
+    let totalBytes = 0;
+    for (const f of accepted) {
+      try {
+        let content = await readFileAsText(f);
+        const ext = (f.name.split('.').pop() || '').toLowerCase();
+        if (['html','htm','xhtml','svg','xml'].includes(ext)) content = stripHtml(content);
+        content = content.replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+        if (content) { texts.push(content); loadedNames.push(f.name); totalBytes += f.size; }
+      } catch (err) { rejected.push(f); }
+    }
+    if (texts.length === 0) { toast('No se pudo leer ningún archivo con contenido.', 'err'); return; }
+    const combined = texts.join('\n\n');
+    const existing = textInput.value.trim();
+    if (existing && !uploadedFileNames.length) {
+      const replace = confirm('Ya hay texto en el área. ¿Reemplazarlo con el contenido del archivo? (Cancelar = añadir al final)');
+      textInput.value = replace ? combined : (existing + '\n\n' + combined);
+    } else if (uploadedFileNames.length) {
+      textInput.value = textInput.value.trim() + '\n\n' + combined;
+    } else {
+      textInput.value = combined;
+    }
+    uploadedFileNames = uploadedFileNames.concat(loadedNames);
+    showFileMeta(loadedNames, totalBytes);
+    updateInputStats();
+    let msg = `${accepted.length} archivo${accepted.length > 1 ? 's' : ''} cargado${accepted.length > 1 ? 's' : ''}`;
+    if (rejected.length) msg += ` · ${rejected.length} omitido${rejected.length > 1 ? 's' : ''}`;
+    toast(msg, 'ok');
+    fileInput.value = '';
+  }
+
+  function showFileMeta(names, bytes) {
+    fileNameEl.textContent = names.length === 1 ? names[0] : `${names.length} archivos`;
+    fileSizeEl.textContent = formatBytes(bytes);
+    fileMeta.classList.add('show');
+  }
+  function clearFileMeta() {
+    uploadedFileNames = [];
+    fileMeta.classList.remove('show');
+  }
+
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+  clearFileBtn.addEventListener('click', () => {
+    clearFileMeta();
+    textInput.value = '';
+    updateInputStats();
+    textInput.focus();
+  });
+
+  let dragDepth = 0;
+  ['dragenter','dragover','dragleave','drop'].forEach(evt => {
+    dropZone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); });
+  });
+  dropZone.addEventListener('dragenter', () => { dragDepth++; dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => {
+    dragDepth--;
+    if (dragDepth <= 0) { dragDepth = 0; dropZone.classList.remove('dragover'); }
+  });
+  dropZone.addEventListener('drop', (e) => {
+    dragDepth = 0;
+    dropZone.classList.remove('dragover');
+    const dt = e.dataTransfer;
+    if (dt && dt.files && dt.files.length) handleFiles(dt.files);
+  });
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => e.preventDefault());
+
+  // ============================================================
+  // ==============  EXPORTAR VÍDEO (MediaRecorder) ============
+  // ============================================================
+  let exportCancelled = false;
+  let exporting = false;
+
+  const MIME_CANDIDATES = [
+    'video/mp4;codecs=avc1.42E01E',
+    'video/mp4',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm'
+  ];
+
+  function pickMime() {
+    if (typeof MediaRecorder === 'undefined') return null;
+    for (const m of MIME_CANDIDATES) {
+      try { if (MediaRecorder.isTypeSupported(m)) return m; } catch(e) {}
+    }
+    return null;
+  }
+
+  function drawWordOnCanvas(ctx, canvas, word, fontSize) {
+    ctx.fillStyle = '#0f0f12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#2e2e38';
+    const cx = canvas.width / 2;
+    ctx.fillRect(cx - 1, canvas.height / 2 - 110, 2, 20);
+    ctx.fillRect(cx - 1, canvas.height / 2 + 90, 2, 20);
+
+    if (!word) return;
+
+    const parts = splitWordByOrp(word);
+
+    ctx.font = `${FONT_WEIGHT} ${fontSize}px ${FONT_FAMILY}`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+
+    const leftW = ctx.measureText(parts.leftTxt).width;
+    const orpW  = ctx.measureText(parts.orpTxt).width;
+
+    const startX = canvas.width / 2 - leftW - orpW / 2;
+    const y = canvas.height / 2;
+
+    ctx.fillStyle = '#e8e8ec';
+    ctx.fillText(parts.leftTxt, startX, y);
+    ctx.fillStyle = '#ff4d6d';
+    ctx.fillText(parts.orpTxt, startX + leftW, y);
+    ctx.fillStyle = '#e8e8ec';
+    ctx.fillText(parts.rightTxt, startX + leftW + orpW, y);
+  }
+
+  function fitFontSize(ctx, word, maxWidth) {
+    const REF = 100;
+    ctx.font = `${FONT_WEIGHT} ${REF}px ${FONT_FAMILY}`;
+    const parts = splitWordByOrp(word);
+    const leftW  = ctx.measureText(parts.leftTxt).width;
+    const orpW   = ctx.measureText(parts.orpTxt).width;
+    const rightW = ctx.measureText(parts.rightTxt).width;
+    const half = Math.max(leftW + orpW / 2, rightW + orpW / 2, 1);
+    const maxByWidth = (maxWidth / 2) * REF / half;
+    return Math.max(24, Math.min(180, maxByWidth));
+  }
+
+  function estimateTotalMs() {
+    let total = 0;
+    for (const w of words) total += intervalFor(w);
+    return total;
+  }
+
+  async function exportVideo() {
+    if (exporting) return;
+    if (words.length === 0) return;
+
+    const mimeType = pickMime();
+    if (!mimeType) {
+      alert('Tu navegador no soporta la grabación de vídeo (MediaRecorder). Prueba con Chrome, Edge o Firefox actualizados.');
+      return;
+    }
+
+    const isMp4 = mimeType.startsWith('video/mp4');
+    const ext = isMp4 ? 'mp4' : 'webm';
+
+    pause();
+    exporting = true;
+    exportCancelled = false;
+
+    const totalMs = estimateTotalMs();
+    const startTime = performance.now();
+
+    exportTitle.textContent = isMp4 ? 'Exportando vídeo (.mp4)…' : 'Exportando vídeo (.webm)…';
+    exportDesc.textContent = 'Grabando en tiempo real. No cambies de pestaña ni minimices el navegador, o la grabación podría pausarse.';
+    exportNote.textContent = isMp4 ? '' : 'Tu navegador no soporta MP4 en MediaRecorder; se exportará como .webm (compatible con todo).';
+    exportProgress.style.width = '0%';
+    exportElapsed.textContent = '0s';
+    exportPercent.textContent = '0%';
+    exportTotal.textContent = formatTime(totalMs / 1000);
+    exportModal.classList.add('active');
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 1920;
+    canvas.height = 1080;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0f0f12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const stream = canvas.captureStream(30);
+
+    let recorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
+    } catch (err) {
+      exportModal.classList.remove('active');
+      exporting = false;
+      alert('No se pudo iniciar el grabador: ' + err.message);
+      return;
+    }
+
+    const chunks = [];
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.start(1000);
+
+    try {
+      for (let i = 0; i < words.length; i++) {
+        if (exportCancelled) break;
+        const w = words[i];
+        const fs = fitFontSize(ctx, w, canvas.width * 0.9);
+        drawWordOnCanvas(ctx, canvas, w, fs);
+        const d = intervalFor(w);
+        const waitUntil = performance.now() + d;
+        while (performance.now() < waitUntil) {
+          if (exportCancelled) break;
+          const now = performance.now();
+          const elapsed = now - startTime;
+          const pct = Math.min(100, (elapsed / totalMs) * 100);
+          exportProgress.style.width = pct + '%';
+          exportPercent.textContent = Math.round(pct) + '%';
+          exportElapsed.textContent = formatTime(elapsed / 1000);
+          await sleep(Math.min(200, waitUntil - now));
+        }
+      }
+    } catch (err) { console.error(err); }
+
+    return new Promise((resolve) => {
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: mimeType });
+        if (!exportCancelled && blob.size > 0) {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `rsvp-${wpm}wpm-${Date.now()}.${ext}`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }
+        exportModal.classList.remove('active');
+        exporting = false;
+        resolve();
+      };
+      try { recorder.stop(); } catch(e) {}
+    });
+  }
+
+  exportBtn.addEventListener('click', exportVideo);
+  exportCancel.addEventListener('click', () => {
+    exportCancelled = true;
+    exportTitle.textContent = 'Cancelando…';
+  });
+
+  // ============================================================
+  // =================  COMPARTIR POR URL  ======================
+  // ============================================================
+  function bytesToBase64Url(bytes) {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function base64UrlToBytes(b64url) {
+    let b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
+    const binary = atob(b64 + pad);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  async function compressToBase64Url(str) {
+    if (typeof CompressionStream === 'undefined') {
+      return bytesToBase64Url(new TextEncoder().encode(str));
+    }
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    writer.write(new TextEncoder().encode(str));
+    writer.close();
+    const buf = await new Response(cs.readable).arrayBuffer();
+    return bytesToBase64Url(new Uint8Array(buf));
+  }
+  async function decompressFromBase64Url(b64url) {
+    const bytes = base64UrlToBytes(b64url);
+    if (typeof DecompressionStream === 'undefined') {
+      return new TextDecoder().decode(bytes);
+    }
+    if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      const ds = new DecompressionStream('gzip');
+      const writer = ds.writable.getWriter();
+      writer.write(bytes);
+      writer.close();
+      return await new Response(ds.readable).text();
+    }
+    return new TextDecoder().decode(bytes);
+  }
+
+  async function buildShareUrl() {
+    const payload = JSON.stringify({ t: textInput.value, w: wpm });
+    const encoded = await compressToBase64Url(payload);
+    return `${location.origin}${location.pathname}#v1=${encoded}`;
+  }
+
+  shareBtn.addEventListener('click', async () => {
+    const url = await buildShareUrl();
+    if (url.length > 8000) {
+      urlHint.textContent = `⚠ URL muy larga (${url.length} chars). Puede no funcionar en algunos navegadores.`;
+      urlHint.classList.add('warn'); urlHint.classList.remove('ok');
+    } else if (url.length > 2000) {
+      urlHint.textContent = `URL: ${url.length} chars (OK en navegadores modernos).`;
+      urlHint.classList.remove('warn'); urlHint.classList.remove('ok');
+    } else {
+      urlHint.textContent = `URL: ${url.length} chars`;
+      urlHint.classList.remove('warn'); urlHint.classList.add('ok');
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      const old = shareBtn.textContent;
+      shareBtn.textContent = '✓ Copiado';
+      setTimeout(() => { shareBtn.textContent = old; }, 1500);
+      history.replaceState(null, '', '#v1=' + url.split('#v1=')[1]);
+    } catch (err) { window.prompt('Copia el enlace:', url); }
+  });
+
+  async function loadFromHash() {
+    if (!location.hash.startsWith('#v1=')) return;
+    const payload = location.hash.slice(4);
+    try {
+      const json = await decompressFromBase64Url(payload);
+      const data = JSON.parse(json);
+      if (typeof data.t === 'string') textInput.value = data.t;
+      if (typeof data.w === 'number' && data.w >= 60 && data.w <= 1200) {
+        wpm = data.w;
+        wpmSlider.value = wpm;
+        wpmValueEl.textContent = wpm;
+      }
+      updateInputStats();
+    } catch (err) {
+      console.error('No se pudo cargar desde el hash:', err);
+      urlHint.textContent = '⚠ No se pudo decodificar el enlace.';
+      urlHint.classList.add('warn');
+    }
+  }
+
+  // ============================================================
+  // =======================  INIT  =============================
+  // ============================================================
+  function init() {
+    try {
+      const saved = localStorage.getItem(WPM_KEY);
+      if (saved) {
+        const n = parseInt(saved, 10);
+        if (n >= 60 && n <= 1200) {
+          wpm = n;
+          wpmSlider.value = n;
+          wpmValueEl.textContent = n;
+        }
+      }
+    } catch(e) {}
+    updateInputStats();
+    loadFromHash();
+    textInput.focus();
+  }
+
+  init();
+
+  startBtn.addEventListener('click', enterReader);
+  backToInput.addEventListener('click', exitReader);
+  playPauseBtn.addEventListener('click', togglePlay);
+  backBtn.addEventListener('click',   () => nudge(-1));
+  fwdBtn.addEventListener('click',    () => nudge(1));
+  back10Btn.addEventListener('click', () => nudge(-10));
+  fwd10Btn.addEventListener('click',  () => nudge(10));
+
+  wpmSlider.addEventListener('input', () => {
+    wpm = parseInt(wpmSlider.value, 10);
+    wpmValueEl.textContent = wpm;
+    try { localStorage.setItem(WPM_KEY, String(wpm)); } catch(e) {}
+    updateProgress();
+  });
+
+  progress.addEventListener('click', (e) => {
+    const rect = progress.getBoundingClientRect();
+    const pct = (e.clientX - rect.left) / rect.width;
+    seekTo(Math.round(pct * (words.length - 1)));
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (!readerScreen.classList.contains('active')) return;
+    if (exportModal.classList.contains('active')) return;
+    if (e.target.matches('input, textarea')) return;
+    switch (e.key) {
+      case ' ': e.preventDefault(); togglePlay(); break;
+      case 'ArrowLeft': e.preventDefault(); nudge(e.shiftKey ? -10 : -1); break;
+      case 'ArrowRight': e.preventDefault(); nudge(e.shiftKey ? 10 : 1); break;
+      case 'ArrowUp':
+        e.preventDefault();
+        wpmSlider.value = Math.min(1200, wpm + 25);
+        wpmSlider.dispatchEvent(new Event('input')); break;
+      case 'ArrowDown':
+        e.preventDefault();
+        wpmSlider.value = Math.max(60, wpm - 25);
+        wpmSlider.dispatchEvent(new Event('input')); break;
+      case 'r': case 'R': e.preventDefault(); seekTo(0); break;
+      case 'Escape': e.preventDefault(); exitReader(); break;
+    }
+  });
+
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (currentWordText) renderWord(currentWordText); }, 100);
+  });
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => { if (currentWordText) renderWord(currentWordText); }, 250);
+  });
+})();
+</script>
+</body>
+</html>
